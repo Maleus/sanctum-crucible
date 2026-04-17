@@ -1,0 +1,63 @@
+# QLoRA fine-tuning configuration for the attacker model
+
+model:
+  base_model: "cognitivecomputations/dolphin-2.5-mixtral-8x7b"
+  output_dir: "checkpoints/attacker-finetuned"
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate"
+    - "w1"
+    - "w2"
+    - "w3"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+training:
+  num_epochs: 3
+  per_device_train_batch_size: 4
+  gradient_accumulation_steps: 4
+  learning_rate: 2.0e-4
+  weight_decay: 0.01
+  warmup_ratio: 0.03
+  lr_scheduler_type: "cosine"
+  max_seq_length: 4096
+  gradient_checkpointing: true
+  bf16: true
+  logging_steps: 10
+  save_steps: 100
+  eval_steps: 100
+  save_total_limit: 3
+  seed: 42
+
+data:
+  # Data sources to combine for fine-tuning
+  sources:
+    - type: "pair_logs"
+      path: "results/pair_logs/baseline"
+      weight: 1.0
+    - type: "harmbench"
+      weight: 0.5
+    - type: "advbench"
+      weight: 0.5
+    - type: "garak"
+      weight: 0.3
+
+  # Train/validation split
+  val_split: 0.1
+
+  # Conversation format template (ChatML for dolphin models)
+  chat_template: "chatml"

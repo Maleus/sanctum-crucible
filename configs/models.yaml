@@ -1,0 +1,43 @@
+# Model configurations for Sanctum Crucible
+# Swap these out to run experiments with different model pairs
+
+attacker:
+  name: "dolphin-2.5-mixtral-8x7b"
+  hf_repo: "cognitivecomputations/dolphin-2.5-mixtral-8x7b"
+  quantization: "awq"  # awq, gptq, or none
+  dtype: "float16"
+  tensor_parallel_size: 1
+  max_model_len: 8192
+  gpu_memory_utilization: 0.85
+  vllm_port: 8001
+
+target:
+  name: "dolphin-mixtral-8x22b"
+  hf_repo: "cognitivecomputations/dolphin-2.5-mixtral-8x22b"
+  quantization: "awq"
+  dtype: "float16"
+  tensor_parallel_size: 2  # Split across 2 GPUs
+  max_model_len: 8192
+  gpu_memory_utilization: 0.85
+  vllm_port: 8002
+
+evaluators:
+  harmbench:
+    name: "harmbench-classifier"
+    hf_repo: "cais/HarmBench-Llama-2-13b-cls"
+    quantization: "awq"
+    dtype: "float16"
+    tensor_parallel_size: 1
+    max_model_len: 4096
+    gpu_memory_utilization: 0.85
+    vllm_port: 8003
+
+  llamaguard:
+    name: "llama-guard-3-8b"
+    hf_repo: "meta-llama/Llama-Guard-3-8B"
+    quantization: "awq"
+    dtype: "float16"
+    tensor_parallel_size: 1
+    max_model_len: 4096
+    gpu_memory_utilization: 0.85
+    vllm_port: 8004
