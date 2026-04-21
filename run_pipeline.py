@@ -76,25 +76,48 @@ def phase_finetune():
     return output_dir
 
 
-def phase_evaluate():
-    """Phase 3: Run fine-tuned PAIR attack."""
+def phase_finetune_multiturn():
+    """Phase 2b: Prepare multi-turn data and fine-tune the attacker."""
+    from crucible.finetune.prepare_multiturn import prepare_multiturn_dataset
+    from crucible.finetune.train import run_finetune
+
+    logger.info("=" * 60)
+    logger.info("PHASE 2b: Multi-turn Data Preparation & Fine-tuning")
+    logger.info("=" * 60)
+
+    config_path = "configs/finetune_multiturn.yaml"
+
+    result = prepare_multiturn_dataset(config_path)
+    if not result:
+        logger.error("Multi-turn dataset preparation failed — no data produced")
+        return None
+
+    logger.info(
+        f"Multi-turn dataset: {len(result['train'])} train, "
+        f"{len(result['validation'])} val examples "
+        f"({len(result['conversations'])} conversations)"
+    )
+
+    output_dir = run_finetune(config_path)
+    logger.info(f"Multi-turn fine-tuned model saved to: {output_dir}")
+
+    return output_dir
+
+
+def _run_finetuned_evaluation(checkpoint_dir: str, run_name: str) -> dict:
+    """Run PAIR attack with a fine-tuned attacker checkpoint."""
     import yaml
     from crucible.data import load_harmbench
     from crucible.pair import PAIROrchestrator
     from crucible.utils.serving import start_all_servers, stop_all_servers
 
-    logger.info("=" * 60)
-    logger.info("PHASE 3: Fine-tuned PAIR Attack")
-    logger.info("=" * 60)
-
-    # Create config with fine-tuned attacker
     with open("configs/models.yaml") as f:
         config = yaml.safe_load(f)
 
-    config["attacker"]["hf_repo"] = "checkpoints/attacker-finetuned"
+    config["attacker"]["hf_repo"] = checkpoint_dir
     config["attacker"]["quantization"] = "none"
 
-    finetuned_config = "configs/models_finetuned.yaml"
+    finetuned_config = f"configs/models_{run_name}.yaml"
     with open(finetuned_config, "w") as f:
         yaml.dump(config, f, default_flow_style=False)
 
@@ -104,41 +127,90 @@ def phase_evaluate():
         behaviors = load_harmbench()
         orchestrator = PAIROrchestrator(config_dir="configs")
         orchestrator.models_config = config
-        summary = orchestrator.run(behaviors, run_name="finetuned")
+        summary = orchestrator.run(behaviors, run_name=run_name)
 
-        logger.info(f"Fine-tuned ASR: {summary['overall_asr']:.2%}")
+        logger.info(f"{run_name} ASR: {summary['overall_asr']:.2%}")
         return summary
     finally:
         stop_all_servers(servers)
 
 
+def phase_evaluate():
+    """Phase 3: Run fine-tuned PAIR attack (single-turn model)."""
+    logger.info("=" * 60)
+    logger.info("PHASE 3: Fine-tuned PAIR Attack (single-turn)")
+    logger.info("=" * 60)
+
+    return _run_finetuned_evaluation(
+        checkpoint_dir="checkpoints/attacker-finetuned",
+        run_name="finetuned",
+    )
+
+
+def phase_evaluate_multiturn():
+    """Phase 3b: Run fine-tuned PAIR attack (multi-turn model)."""
+    logger.info("=" * 60)
+    logger.info("PHASE 3b: Fine-tuned PAIR Attack (multi-turn)")
+    logger.info("=" * 60)
+
+    return _run_finetuned_evaluation(
+        checkpoint_dir="checkpoints/attacker-finetuned-multiturn",
+        run_name="finetuned-multiturn",
+    )
+
+
 def phase_compare():
-    """Compare baseline and fine-tuned results."""
+    """Compare baseline vs single-turn vs multi-turn fine-tuned results."""
     from crucible.evaluate.metrics import compare_runs, print_comparison
 
     logger.info("=" * 60)
-    logger.info("COMPARISON: Baseline vs Fine-tuned")
+    logger.info("COMPARISON: Baseline vs Fine-tuned variants")
     logger.info("=" * 60)
 
-    comparison = compare_runs(
-        baseline_dir="results/pair_logs/baseline",
-        finetuned_dir="results/pair_logs/finetuned",
-    )
+    comparisons = {}
 
-    print_comparison(comparison)
+    # Baseline vs single-turn
+    if Path("results/pair_logs/finetuned").exists():
+        logger.info("--- Baseline vs Single-turn Fine-tuned ---")
+        comp_st = compare_runs(
+            baseline_dir="results/pair_logs/baseline",
+            finetuned_dir="results/pair_logs/finetuned",
+        )
+        print_comparison(comp_st)
+        comparisons["single_turn"] = comp_st
+
+    # Baseline vs multi-turn
+    if Path("results/pair_logs/finetuned-multiturn").exists():
+        logger.info("--- Baseline vs Multi-turn Fine-tuned ---")
+        comp_mt = compare_runs(
+            baseline_dir="results/pair_logs/baseline",
+            finetuned_dir="results/pair_logs/finetuned-multiturn",
+        )
+        print_comparison(comp_mt)
+        comparisons["multi_turn"] = comp_mt
+
+    if not comparisons:
+        logger.error("No fine-tuned results found to compare")
+        return None
 
     with open("results/comparison.json", "w") as f:
-        json.dump(comparison, f, indent=2)
+        json.dump(comparisons, f, indent=2)
 
     logger.info("Comparison saved to results/comparison.json")
-    return comparison
+    return comparisons
 
 
 def main():
     parser = argparse.ArgumentParser(description="Sanctum Crucible Pipeline")
     parser.add_argument(
         "--phase",
-        choices=["baseline", "finetune", "evaluate", "compare", "all"],
+        choices=[
+            "baseline",
+            "finetune", "finetune-multiturn",
+            "evaluate", "evaluate-multiturn",
+            "compare",
+            "all", "all-multiturn",
+        ],
         default="all",
         help="Which phase to run (default: all)",
     )
@@ -146,16 +218,22 @@ def main():
 
     Path("logs").mkdir(exist_ok=True)
 
-    if args.phase in ("all", "baseline"):
+    if args.phase in ("all", "all-multiturn", "baseline"):
         phase_baseline()
 
     if args.phase in ("all", "finetune"):
         phase_finetune()
 
+    if args.phase in ("all-multiturn", "finetune-multiturn"):
+        phase_finetune_multiturn()
+
     if args.phase in ("all", "evaluate"):
         phase_evaluate()
 
-    if args.phase in ("all", "compare"):
+    if args.phase in ("all-multiturn", "evaluate-multiturn"):
+        phase_evaluate_multiturn()
+
+    if args.phase in ("all", "all-multiturn", "compare"):
         phase_compare()
 
 

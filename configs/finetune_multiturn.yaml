@@ -1,0 +1,60 @@
+# QLoRA fine-tuning configuration — MULTI-TURN variant
+# Uses structured multi-turn PAIR conversations instead of flat single-turn examples
+
+model:
+  base_model: "cognitivecomputations/dolphin-2.5-mixtral-8x7b"
+  output_dir: "checkpoints/attacker-finetuned-multiturn"
+
+quantization:
+  load_in_4bit: true
+  bnb_4bit_quant_type: "nf4"
+  bnb_4bit_compute_dtype: "bfloat16"
+  bnb_4bit_use_double_quant: true
+
+lora:
+  r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate"
+    - "w1"
+    - "w2"
+    - "w3"
+  bias: "none"
+  task_type: "CAUSAL_LM"
+
+training:
+  num_epochs: 3
+  per_device_train_batch_size: 2        # Reduced — multi-turn sequences are longer
+  gradient_accumulation_steps: 8        # Compensate for smaller batch
+  learning_rate: 1.5e-4                 # Slightly lower — fewer but richer examples
+  weight_decay: 0.01
+  warmup_ratio: 0.05
+  lr_scheduler_type: "cosine"
+  max_seq_length: 6144                  # Increased — multi-turn conversations are longer
+  gradient_checkpointing: true
+  bf16: true
+  logging_steps: 10
+  save_steps: 50
+  eval_steps: 50
+  save_total_limit: 3
+  seed: 42
+
+data:
+  sources:
+    - type: "pair_logs"
+      path: "results/pair_logs/baseline"
+      weight: 1.0
+
+  val_split: 0.1
+  chat_template: "chatml"
+
+  # Multi-turn specific
+  multiturn: true
+  min_turns: 2
+  train_file: "data/finetune/multiturn_train.jsonl"
+  val_file: "data/finetune/multiturn_val.jsonl"
